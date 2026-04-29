@@ -1,0 +1,18 @@
+FROM espressif/idf:v5.3
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends clangd vim curl && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    ln -sf /root/.local/bin/claude /usr/local/bin/claude
+
+RUN echo 'HISTSIZE=1000' >> /root/.bashrc && \
+    echo 'HISTFILESIZE=2000' >> /root/.bashrc && \
+    echo 'PROMPT_COMMAND="history -a"' >> /root/.bashrc && \
+    echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc
+
+RUN sed -i 's/# force_color_prompt=yes/force_color_prompt=yes/' /root/.bashrc && \
+    sed -i 's|\\u@\\h|\\n\\u@zt-dev|' /root/.bashrc
+
+CMD ["sleep", "infinity"]

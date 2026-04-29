@@ -1,0 +1,31 @@
+/opt/esp/idf/tools/idf.py:357: DeprecationWarning: 'MultiCommand' is deprecated and will be removed in Click 9.0. Use 'Group' instead.
+  class CLI(click.MultiCommand):
+Executing action: all (aliases: build)
+Running ninja in directory /project/build
+Executing "ninja all"...
+[0/1] Re-running CMake...
+-- ccache will be used for faster recompilation
+-- git rev-parse returned 'fatal: not a git repository (or any parent up to mount point /)
+Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).'
+-- Could not use 'git describe' to determine PROJECT_VER.
+-- Building ESP-IDF components for target esp32s3
+CMake Error at /opt/esp/idf/tools/cmake/build.cmake:268 (message):
+  Failed to resolve component 'LINK_FRAGMENTS'.
+Call Stack (most recent call first):
+  /opt/esp/idf/tools/cmake/build.cmake:304 (__build_resolve_and_add_req)
+  /opt/esp/idf/tools/cmake/build.cmake:305 (__build_expand_requirements)
+  /opt/esp/idf/tools/cmake/build.cmake:607 (__build_expand_requirements)
+  /opt/esp/idf/tools/cmake/project.cmake:710 (idf_build_process)
+  CMakeLists.txt:3 (project)
+
+
+-- Configuring incomplete, errors occurred!
+See also "/project/build/CMakeFiles/CMakeOutput.log".
+FAILED: build.ninja 
+/opt/esp/tools/cmake/3.24.0/bin/cmake --regenerate-during-build -S/project -B/project/build
+ninja: error: rebuilding 'build.ninja': subcommand failed
+[0;33mHINT: The component LINK_FRAGMENTS could not be found. This could be because: component name was misspelled, the component was not added to the build, the component has been moved to the IDF component manager or has been removed and refactored into some other component.
+Please look out for component in 'https://components.espressif.com' and add using 'idf.py add-dependency' command.
+Refer to the migration guide for more details about moved components.
+Refer to the build-system guide for more details about how components are found and included in the build.[0m
+ninja failed with exit code 1, output of the command is in the /project/build/log/idf_py_stderr_output_17544 and /project/build/log/idf_py_stdout_output_17544

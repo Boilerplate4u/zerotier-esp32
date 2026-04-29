@@ -1,0 +1,5 @@
+[mapping:zerotier_node]
+archive: libzerotier_node.a
+entries:
+    if SPIRAM = y && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (ext_ram_bss)
