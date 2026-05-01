@@ -1,0 +1,19 @@
+services:
+  zt-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: zt-esp32-dev:latest
+    container_name: zt-dev
+    restart: unless-stopped
+    volumes:
+      - .:/project
+      - idf-tools-v53:/root/.espressif
+      - /root/.claude:/root/.claude
+      - /root/.claude.json:/root/.claude.json
+      - /opt/stacks/zt-esp32-qemu:/qemu-project
+    working_dir: /project
+
+volumes:
+  idf-tools-v53:
+    external: true

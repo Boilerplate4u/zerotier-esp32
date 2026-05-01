@@ -1,0 +1,395 @@
+# CLAUDE.md — ZeroTier ESP32 Port
+
+> **NOTE:** You are running inside container `zt-dev`. All commands are direct shell commands.
+> **ENVIRONMENT:** Running as root inside an isolated Docker container. All bash commands can be executed without confirmation.
+> Project root is `/project`. QEMU project: `/qemu-project/`.
+
+---
+
+## Session Start — Always Run First
+
+```bash
+export PATH=/opt/esp/tools/cmake/3.24.0/bin:$PATH
+. /opt/esp/idf/export.sh
+```
+
+Verify QEMU project exists:
+```bash
+ls /qemu-project/sdkconfig.defaults 2>/dev/null || echo "QEMU project missing — must be recreated"
+```
+
+---
+
+## Project Overview
+
+Port of the ZeroTier `node/` core (from `github.com/zerotier/ZeroTierOne` dev-branch) to ESP32
+as an ESP-IDF component. Two parallel build targets:
+
+| Target | Purpose | Status |
+|--------|---------|--------|
+| ESP32-S3 + PSRAM | Production hardware | Compiles and links; PSRAM linker fragment not yet verified |
+| ESP32 original + QEMU | Development/testing without hardware | QEMU boots, Ethernet OK, `ZT_Node_new` returns rc=100 (malloc failure) |
+
+---
+
+## Build Commands
+
+### ESP32-S3 Production
+
+```bash
+cd /project && idf.py build
+```
+
+### ESP32 QEMU
+
+```bash
+export EXTRA_CPPFLAGS='-DZT_MAX_NETWORK_RULES=32 -DZT_MAX_NETWORK_CAPABILITIES=1 \
+  -DZT_MAX_NETWORK_TAGS=1 -DZT_MAX_CERTIFICATES_OF_OWNERSHIP=1 \
+  -DZT_MAX_CAPABILITY_RULES=1 -DZT_RX_QUEUE_SIZE=4 \
+  -DZT_TX_QUEUE_SIZE=4 -DZT_DEFAULT_PHYSMTU=1280'
+cd /qemu-project && idf.py build
+```
+
+### Run QEMU
+
+```bash
+# Build 4 MB flash image
+python3 -c "
+flash_size=4*1024*1024
+open('/tmp/qemu_flash.bin','wb').write(b'\xff'*flash_size)
+def w(s,o): d=open(s,'rb').read(); f=open('/tmp/qemu_flash.bin','r+b'); f.seek(o); f.write(d); f.close()
+w('/qemu-project/build/bootloader/bootloader.bin',0x1000)
+w('/qemu-project/build/partition_table/partition-table.bin',0x8000)
+w('/qemu-project/build/zt_esp32_qemu.bin',0x10000)
+"
+export PATH=/root/.espressif/tools/qemu-xtensa/esp_develop_8.2.0_20240122/qemu/bin:$PATH
+qemu-system-xtensa -nographic -machine esp32 \
+  -drive file=/tmp/qemu_flash.bin,if=mtd,format=raw \
+  -nic user,model=open_eth -no-reboot
+```
+
+---
+
+## Directory Structure
+
+```
+/project/
+├── CMakeLists.txt
+├── sdkconfig.defaults          ← ESP32-S3 + PSRAM configuration
+├── CLAUDE.md                   ← this file
+├── main/
+│   ├── CMakeLists.txt
+│   └── main.cpp                ← Phase 2: ZT_Node_new + NVS + UDP socket
+├── components/
+│   └── zerotier_node/
+│       ├── CMakeLists.txt
+│       ├── zerotier_spiram.lf  ← Linker fragment: ZT BSS → PSRAM (unverified)
+│       └── port/
+│           ├── stubs/
+│           │   ├── prometheus/simpleapi.h
+│           │   ├── nlohmann/json.hpp
+│           │   ├── ifaddrs.h
+│           │   └── sys/un.h
+│           ├── zt_mutex.cpp
+│           ├── zt_utils_esp.cpp
+│           ├── zt_metrics_esp.cpp
+│           ├── zt_bond_esp.cpp
+│           ├── zt_trace_esp.cpp
+│           ├── zt_storage_esp.cpp
+│           ├── zt_socket_esp.cpp
+│           └── zt_tap_esp.cpp
+└── ZeroTierOne/                ← Patched ZeroTier source tree
+
+/qemu-project/
+├── CMakeLists.txt              ← EXTRA_COMPONENT_DIRS → /project/components
+├── sdkconfig.defaults          ← esp32 + OpenEth + C++ exceptions
+└── main/main.cpp               ← OpenEth init + ZT_Node_new + heap diagnostics
+```
+
+---
+
+## Patches Applied to ZeroTierOne Source
+
+| File | Change |
+|------|--------|
+| `node/Mutex.hpp` | `#if defined(ESP_PLATFORM)` block — FreeRTOS `SemaphoreHandle_t` replaces pthreads |
+| `node/NetworkConfig.hpp` | `#ifdef ZT_NETWORKCONFIG_DICT_CAPACITY_OVERRIDE` — allows reduced Dictionary capacity |
+| `node/Utils.cpp` | `randomBuf[65536]` → `randomBuf[256]` — reduces BSS by 64 KB |
+| `include/ZeroTierOne.h` | `#ifndef` guards on `ZT_MAX_NETWORK_RULES`, `ZT_MAX_NETWORK_CAPABILITIES`, `ZT_MAX_NETWORK_TAGS`, `ZT_MAX_CERTIFICATES_OF_OWNERSHIP`, `ZT_MAX_CAPABILITY_RULES` |
+| `node/Constants.hpp` | `ZT_RX_QUEUE_SIZE`, `ZT_TX_QUEUE_SIZE`, `ZT_MAX_PACKET_FRAGMENTS` already had `#ifndef` guards |
+
+**Pending patch (next step):**
+```c
+// Constants.hpp ~line 290 — add before existing ZT_DEFAULT_PHYSMTU definition
+#ifndef ZT_DEFAULT_PHYSMTU
+#define ZT_DEFAULT_PHYSMTU 1500
+#endif
+```
+
+---
+
+## Known Issues
+
+### 1. QEMU rc=100 — ACTIVE BLOCKER
+
+**Symptom:** `ZT_Node_new` returns `rc=100` (`ZT_RESULT_FATAL_ERROR_OUT_OF_MEMORY`)
+
+**Root cause:** `Node` constructor allocates all core structures in a single `malloc()` call:
+```
+malloc(Trace + Switch + Multicaster + Topology + SelfAwareness + Bond + PacketMultiplexer)
+```
+`sizeof(Switch) ≈ 617 KB` because `_rxQueue[32]` × `RXQueueEntry` (~19 KB each).
+`RXQueueEntry` contains `IncomingPacket` = `Buffer<ZT_PROTO_MAX_PACKET_LENGTH>`
+= `Buffer<7 × 1500>` = 10,500 bytes per entry.
+Largest contiguous free heap block = 110 KB → `malloc` fails → `std::bad_alloc` → rc=100.
+
+**Fix:** Reduce queue sizes and MTU via `EXTRA_CPPFLAGS` (see build command above).
+`ZT_DEFAULT_PHYSMTU` lacks a `#ifndef` guard — patch `Constants.hpp` first (see above).
+
+**Estimated `sizeof(Switch)` after fix:** ~25 KB. Fits comfortably.
+
+### 2. DRAM BSS Overflow — ESP32-S3 Production
+
+**Symptom:** Linker error: `dram0.bss overflowed by ~213 KB`
+
+**Root cause:** `static const NetworkConfig NIL_NC` in `NetworkConfig::fromDictionary()` = 436 KB
+BSS + `randomBuf[256]` = 256 bytes. Total ~436 KB in internal DRAM.
+
+**Fix:** Linker fragment `zerotier_spiram.lf` maps ZeroTier BSS to PSRAM via `extern_ram` segment.
+Requires `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y` in `sdkconfig.defaults`.
+
+Correct `zerotier_spiram.lf` content (verified against `bt/linker_common.lf`):
+```
+[mapping:zerotier_node]
+archive: libzerotier_node.a
+entries:
+    if SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY = y:
+        * (extram_bss);
+            bss -> extern_ram ALIGN(4) ALIGN(4, post) SURROUND(zt_bss),
+            common -> extern_ram ALIGN(4) ALIGN(4, post) SURROUND(zt_common)
+```
+
+`LINK_FRAGMENTS` must be placed after the `PRIV_REQUIRES` block, inside `idf_component_register()`:
+```cmake
+idf_component_register(
+    ...
+    PRIV_REQUIRES
+        esp_system
+    LINK_FRAGMENTS ${CMAKE_CURRENT_SOURCE_DIR}/zerotier_spiram.lf
+)
+```
+
+### 3. C++ Exceptions Required
+
+`CONFIG_COMPILER_CXX_EXCEPTIONS=y` must be set in `sdkconfig.defaults`.
+Without it, IDF replaces `__cxa_allocate_exception` with a stub that calls `abort()`,
+preventing ZeroTier's internal exception handling from working.
+
+### 4. EXTRA_CPPFLAGS vs add_compile_definitions — Mutual Exclusion
+
+Never use both `add_compile_definitions()` in `CMakeLists.txt` and `EXTRA_CPPFLAGS` environment
+variable simultaneously. Both are propagated to all components, resulting in duplicate
+macro definitions and `-Werror` compilation failures.
+
+### 5. WiFi Stack Dependency (Resolved)
+
+`wpa_supplicant` and `wifi_provisioning` were pulled in transitively even with
+`CONFIG_ESP_WIFI_ENABLED=n`. Root cause: `esp_wifi` was explicitly listed in
+`zerotier_node` REQUIRES. Fixed — removed from `/project/components/zerotier_node/CMakeLists.txt`.
+
+---
+
+## Stub Files
+
+All stubs reside under `/project/components/zerotier_node/port/stubs/`:
+
+| File | Purpose |
+|------|---------|
+| `prometheus/simpleapi.h` | Full prometheus-cpp stub: `Counter`, `Gauge`, `Histogram<T>`, `BuilderT<T>`, `CustomFamily<T>`, all operators, `Add(map)`, `Add(map, vector)`, `SaveToFile`, `registry` |
+| `prometheus/histogram.h`, `registry.h`, `gauge.h`, `counter.h`, `exposer.h` | Forward to `simpleapi.h` |
+| `nlohmann/json.hpp` | Minimal JSON stub |
+| `ifaddrs.h` | Empty POSIX stub (lwIP lacks `getifaddrs`) |
+| `sys/un.h` | `sockaddr_un`, `AF_UNIX`, `PF_UNIX` (ESP32 has no Unix domain sockets) |
+
+## Port Implementations
+
+All under `/project/components/zerotier_node/port/`:
+
+| File | Purpose |
+|------|---------|
+| `zt_mutex.cpp` | `Mutex::lock/unlock` via `xSemaphoreTake/Give` |
+| `zt_utils_esp.cpp` | `Utils::getSecureRandom` via `esp_fill_random` |
+| `zt_metrics_esp.cpp` | Defines all `extern` symbols from `Metrics.hpp` as empty instances |
+| `zt_bond_esp.cpp` | `Bond` constructors + `recordOutgoingPacket`, `getAppropriatePath`, `createBond`, `destroyBond`, `processBackgroundTasks`, etc. |
+| `zt_trace_esp.cpp` | All `Trace` methods: `networkFilter`, all `credentialRejected` overloads, `incomingNetworkAccessDenied`, etc. |
+| `zt_storage_esp.cpp` | NVS-backed state storage for ZeroTier identity and peer data |
+| `zt_socket_esp.cpp` | lwIP UDP socket on port 9993, FreeRTOS receive task |
+| `zt_tap_esp.cpp` | `virtualNetworkFrameFunction` and `virtualNetworkConfigFunction` callbacks (Phase 2 — logs frames only, no esp_netif attachment yet) |
+
+---
+
+## Dependencies
+
+| Component | Version | Location |
+|-----------|---------|----------|
+| ESP-IDF | v5.3 | `/opt/esp/idf/` |
+| xtensa-esp-elf toolchain | esp-13.2.0_20240530 | `/root/.espressif/tools/xtensa-esp-elf/` |
+| cmake | 3.24.0 | `/opt/esp/tools/cmake/3.24.0/bin/` |
+| QEMU xtensa | esp_develop_8.2.0_20240122 | `/root/.espressif/tools/qemu-xtensa/...` — supports ESP32 original only, not S3 |
+| prometheus-cpp | Stubbed (not the real library) | `port/stubs/prometheus/` |
+| idf-component-manager | 1.4.2 (downgraded) | Requires `schema==0.7.4` for IDF 5.3 compatibility |
+
+---
+
+## Environment Variables
+
+### Required in every session
+
+```bash
+export PATH=/opt/esp/tools/cmake/3.24.0/bin:$PATH
+. /opt/esp/idf/export.sh
+```
+
+### Required for QEMU builds
+
+```bash
+export EXTRA_CPPFLAGS='-DZT_MAX_NETWORK_RULES=32 \
+  -DZT_MAX_NETWORK_CAPABILITIES=1 \
+  -DZT_MAX_NETWORK_TAGS=1 \
+  -DZT_MAX_CERTIFICATES_OF_OWNERSHIP=1 \
+  -DZT_MAX_CAPABILITY_RULES=1 \
+  -DZT_RX_QUEUE_SIZE=4 \
+  -DZT_TX_QUEUE_SIZE=4 \
+  -DZT_DEFAULT_PHYSMTU=1280'
+```
+
+### Required to run QEMU
+
+```bash
+export PATH=/root/.espressif/tools/qemu-xtensa/esp_develop_8.2.0_20240122/qemu/bin:$PATH
+```
+
+### sdkconfig.defaults — ESP32-S3 Production (`/project/sdkconfig.defaults`)
+
+```
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_LWIP_IPV6=y
+CONFIG_PARTITION_TABLE_SINGLE_APP=y
+CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MEMTEST=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_VFS_SUPPORT_TERMIOS=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+```
+
+### sdkconfig.defaults — QEMU (`/qemu-project/sdkconfig.defaults`)
+
+```
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ETH_ENABLED=y
+CONFIG_ETH_USE_OPENETH=y
+CONFIG_ESP_WIFI_ENABLED=n
+CONFIG_BT_ENABLED=n
+CONFIG_BLUEDROID_ENABLED=n
+CONFIG_MBEDTLS_HARDWARE_AES=n
+CONFIG_MBEDTLS_HARDWARE_SHA=n
+CONFIG_MBEDTLS_HARDWARE_MPI=n
+CONFIG_LWIP_IPV6=y
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+```
+
+---
+
+## Test Procedure
+
+### Verify ESP32-S3 build
+
+```bash
+cd /project
+idf.py build 2>&1 | tail -5
+# Expected: "zt_esp32.bin binary size 0x... bytes. ... free."
+# Failure: "dram0.bss overflowed" → linker fragment not working
+```
+
+### Verify QEMU build and execution
+
+```bash
+# Build (set EXTRA_CPPFLAGS first — see above)
+cd /qemu-project && idf.py build
+
+# Run QEMU (see run command above)
+
+# Expected serial output:
+# I (xxxx) zt_qemu: IP: 10.0.2.15              ← Ethernet + DHCP working
+# I (xxxx) zt_qemu: ZT_Node_new rc=0 node=...  ← Node created successfully
+# I (xxxx) zt_qemu: ZT event: 6                ← ZT_EVENT_ONLINE
+```
+
+### Size analysis
+
+```bash
+cd /project   # or /qemu-project
+idf.py size-components 2>/dev/null | grep -E 'zerotier|Total'
+```
+
+---
+
+## Open Questions
+
+| Question | Status |
+|----------|--------|
+| PSRAM linker fragment for BSS (ESP32-S3) | Written, not verified — likely correct, needs testing |
+| `ZT_DEFAULT_PHYSMTU` lacks `#ifndef` guard | Must patch `Constants.hpp` before next QEMU build |
+| `zt_tap_esp.cpp` — esp_netif attachment | Phase 3, not implemented |
+| ZeroTier Central reachability via QEMU SLIRP | Expected to work — UDP port 9993 out via SLIRP user-mode NAT |
+| `ZT_Node_join` and network membership | Phase 3, after `ZT_Node_new` succeeds |
+| ESP32-S3 hardware for runtime validation | Required for production target, QEMU sufficient for phase 2 |
+
+---
+
+## Next Steps
+
+**Priority 1 — Fix QEMU rc=100**
+
+1. Patch `Constants.hpp` — add `#ifndef` guard for `ZT_DEFAULT_PHYSMTU`:
+   ```c
+   // /project/ZeroTierOne/node/Constants.hpp ~line 290
+   #ifndef ZT_DEFAULT_PHYSMTU
+   #define ZT_DEFAULT_PHYSMTU 1500
+   #endif
+   ```
+
+2. Verify QEMU project files exist:
+   ```bash
+   ls /qemu-project/sdkconfig.defaults
+   ls /qemu-project/main/CMakeLists.txt
+   ```
+   If missing — recreate the project (refer to conversation history or `BUILD_STATUS.md`).
+
+3. Clean and build with reduced queue and MTU sizes:
+   ```bash
+   export PATH=/opt/esp/tools/cmake/3.24.0/bin:$PATH
+   . /opt/esp/idf/export.sh
+   export EXTRA_CPPFLAGS='-DZT_MAX_NETWORK_RULES=32 -DZT_MAX_NETWORK_CAPABILITIES=1 -DZT_MAX_NETWORK_TAGS=1 -DZT_MAX_CERTIFICATES_OF_OWNERSHIP=1 -DZT_MAX_CAPABILITY_RULES=1 -DZT_RX_QUEUE_SIZE=4 -DZT_TX_QUEUE_SIZE=4 -DZT_DEFAULT_PHYSMTU=1280'
+   cd /qemu-project && rm -rf build && idf.py build
+   ```
+
+4. Run QEMU — verify `ZT_Node_new rc=0` in serial output.
+
+**Priority 2 — Verify PSRAM Linker Fragment (ESP32-S3)**
+
+Test production build with linker fragment. See Known Issue #2 for correct syntax.
+Check that `LINK_FRAGMENTS` is inside `idf_component_register()` after `PRIV_REQUIRES`.
+
+**Priority 3 — ZT_Node_join**
+
+Once `ZT_Node_new` returns rc=0: call `ZT_Node_join(node, NETWORK_ID)` and verify
+the node appears in ZeroTier Central.

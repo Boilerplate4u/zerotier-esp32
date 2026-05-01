@@ -11,7 +11,13 @@ services:
       - idf-tools-v53:/root/.espressif
       - /root/.claude:/root/.claude
       - /root/.claude.json:/root/.claude.json
+      - /opt/stacks/zt-esp32-qemu:/qemu-project
     working_dir: /project
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
 
 volumes:
   idf-tools-v53:

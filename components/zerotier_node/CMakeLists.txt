@@ -11,12 +11,14 @@ list(APPEND ZT_ALL_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/port/zt_storage_esp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/port/zt_socket_esp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/port/zt_tap_esp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/port/zt_osutils_esp.cpp
 )
 
 idf_component_register(
     SRCS ${ZT_ALL_SRCS}
     INCLUDE_DIRS
         /project/ZeroTierOne/node
+        /project/ZeroTierOne/osdep
         port
         port/stubs
         /project/ZeroTierOne/include
