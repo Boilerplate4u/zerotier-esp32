@@ -1,5 +1,5 @@
 // ESP32 ZeroTier TAP wrapper — Ethernet frames via esp_netif
-// Fas 2: minimal implementation som loggar frames, ingen faktisk netif ännu
+// Phase 2: minimal implementation that logs frames, no actual netif yet
 #include <stdio.h>
 #include "esp_log.h"
 #include "ZeroTierOne.h"
@@ -13,7 +13,7 @@ extern "C" void zt_virtual_frame_impl(
     unsigned int etherType, unsigned int vlanId,
     const void *frameData, unsigned int frameLen)
 {
-    // Fas 2: logga inkomna frames - fas 3 ansluter till esp_netif
+    // Phase 2: log incoming frames - phase 3 connects to esp_netif
     ESP_LOGD(TAG, "frame nwid=%llx src=%llx dst=%llx type=0x%04x len=%u",
         nwid, sourceMac, destMac, etherType, frameLen);
 }

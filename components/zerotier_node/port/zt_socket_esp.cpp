@@ -1,4 +1,4 @@
-// ESP32 ZeroTier socket wrapper — lwIP UDP på port 9993
+// ESP32 ZeroTier socket wrapper — lwIP UDP on port 9993
 #include <string.h>
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
@@ -11,12 +11,12 @@
 
 static const char *TAG = "zt_socket";
 
-// Globalt socket och node-referens
+// Global socket and node reference
 static int zt_sock = -1;
 static ZT_Node *zt_node_ref = nullptr;
 static void *zt_uptr_ref = nullptr;
 
-// Skapar och binder UDP-socket på port 9993
+// Creates and binds UDP socket on port 9993
 extern "C" int zt_socket_init(void) {
     zt_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (zt_sock < 0) {
@@ -36,7 +36,7 @@ extern "C" int zt_socket_init(void) {
         return -1;
     }
 
-    // Sätt 100ms timeout så receive-loopen inte blockerar för evigt
+    // Set a 100ms timeout so the receive loop does not block forever
     struct timeval tv = { .tv_sec = 0, .tv_usec = 100000 };
     setsockopt(zt_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -64,7 +64,7 @@ static void zt_recv_task(void *arg) {
     }
 }
 
-// Startar receive-task — anropas efter ZT_Node_new
+// Starts receive task — called after ZT_Node_new
 extern "C" void zt_socket_start_recv(ZT_Node *node, void *uptr) {
     zt_node_ref = node;
     zt_uptr_ref = uptr;

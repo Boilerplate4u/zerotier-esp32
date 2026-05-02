@@ -9,7 +9,7 @@
 
 static const char *TAG = "zt_main";
 
-// Deklarationer från port-filer
+// Declarations from port files
 extern "C" int  zt_state_get_impl(ZT_Node*, void*, void*, enum ZT_StateObjectType, const uint64_t*, void*, unsigned int);
 extern "C" void zt_state_put_impl(ZT_Node*, void*, void*, enum ZT_StateObjectType, const uint64_t*, const void*, int);
 extern "C" int  zt_wire_send_impl(ZT_Node*, void*, void*, int64_t, const struct sockaddr_storage*, const void*, unsigned int, unsigned int);
@@ -38,27 +38,27 @@ static void zt_event(ZT_Node *node, void *uptr, void *tptr,
 
 static void zt_main_task(void *arg)
 {
-    // Initialisera NVS
+    // Initialize NVS
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
         nvs_flash_init();
     }
 
-    // Mät DIRAM före ZT_Node_new
+    // Measure DIRAM before ZT_Node_new
     size_t diram_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(TAG, "DIRAM ledigt före ZT_Node_new: %u bytes", (unsigned)diram_before);
     ESP_LOGI(TAG, "PSRAM ledigt före ZT_Node_new: %u bytes", (unsigned)psram_before);
 
-    // Initialisera UDP-socket
+    // Initialize UDP socket
     if (zt_socket_init() != 0) {
         ESP_LOGE(TAG, "zt_socket_init misslyckades");
         vTaskDelete(nullptr);
         return;
     }
 
-    // Sätt upp callbacks
+    // Set up callbacks
     ZT_Node_Callbacks cb;
     memset(&cb, 0, sizeof(cb));
     cb.version                      = 0;
@@ -71,7 +71,7 @@ static void zt_main_task(void *arg)
     cb.pathCheckFunction            = zt_path_check;
     cb.pathLookupFunction           = zt_path_lookup;
 
-    // Skapa ZeroTier-nod
+    // Create ZeroTier node
     ZT_Node *node = nullptr;
     int64_t now = (int64_t)(esp_timer_get_time() / 1000ULL);
     ZT_ResultCode rc = ZT_Node_new(&node, nullptr, nullptr, nullptr, &cb, now);
@@ -88,10 +88,10 @@ static void zt_main_task(void *arg)
         return;
     }
 
-    // Starta receive-task
+    // Start receive task
     zt_socket_start_recv(node, nullptr);
 
-    // Huvudloop: kör ZT_Node_processBackgroundTasks var 100ms
+    // Main loop: run ZT_Node_processBackgroundTasks every 100ms
     while (1) {
         now = (int64_t)(esp_timer_get_time() / 1000ULL);
         int64_t next_run = now + 100;

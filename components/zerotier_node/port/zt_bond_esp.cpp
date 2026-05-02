@@ -4,24 +4,24 @@
 
 namespace ZeroTier {
 
-// Statiska medlemmar
+// Static members
 int Bond::_minReqMonitorInterval = 100;
 uint8_t Bond::_defaultPolicy = 0;
 std::string Bond::_defaultPolicyStr;
 std::map<std::string, SharedPtr<Bond>> Bond::_bondPolicyTemplates;
 
-// Konstruktorer
+// Constructors
 Bond::Bond(const RuntimeEnvironment *renv) {}
 Bond::Bond(const RuntimeEnvironment *renv, int policy, const SharedPtr<Peer>& peer) {}
 Bond::Bond(const RuntimeEnvironment *renv, std::string& basePolicy, std::string& policyAlias, const SharedPtr<Peer>& peer) {}
 Bond::Bond(const RuntimeEnvironment *renv, SharedPtr<Bond> originalBond, const SharedPtr<Peer>& peer) {}
 
-// Statiska metoder
+// Static methods
 SharedPtr<Bond> Bond::createBond(const RuntimeEnvironment* renv, const SharedPtr<Peer>& peer) { return SharedPtr<Bond>(); }
 void Bond::destroyBond(uint64_t peerId) {}
 void Bond::processBackgroundTasks(void* tPtr, int64_t now) {}
 
-// Instansmetoder
+// Instance methods
 void Bond::nominatePathToBond(const SharedPtr<Path>& path, int64_t now) {}
 void Bond::recordOutgoingPacket(const SharedPtr<Path>& path, uint64_t packetId, uint16_t payloadLength, Packet::Verb verb, int32_t flowId, int64_t now) {}
 void Bond::recordIncomingPacket(const SharedPtr<Path>& path, uint64_t packetId, uint16_t payloadLength, Packet::Verb verb, int32_t flowId, int64_t now) {}
