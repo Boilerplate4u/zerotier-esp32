@@ -1,4 +1,4 @@
-# ZeroTier client for ESP32 / ESPHome
+# ZeroTier client for ESP32 / ESPHome (Home Assistant)
 
 > Experimental open source effort to create a working ZeroTier client for ESP32 devices, with first-class integration for ESPHome and Home Assistant.
 
@@ -27,7 +27,7 @@ The node initializes and joins locally but fails to reach `ONLINE` status or reg
 
 ## Technical challenges
 
-Porting ZeroTier One to the ESP32 involves overcoming constraints not present in standard PC/server environments:
+Porting ZeroTier One to the ESP32 involves overcoming constraints not present in standard ZeroTier client environments:
 
 *   **Memory & Stack:** Managing the ZeroTier stack within limited RAM and avoiding heap fragmentation.
 *   **Networking:** Aligning ZeroTier's logic with lwIP behavior and FreeRTOS task scheduling.
